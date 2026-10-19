@@ -1,39 +1,59 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 
-st.set_page_config(page_title="Pharma Expiry Intelligence | Darshan Mahale")
+st.set_page_config(page_title="Pharma Expiry Intelligence", layout="wide")
 
 st.title("💊 AI Expiry Intelligence Add-On for Care / Marg")
-st.write("Built by Darshan Mahale | B.Pharm + AI Consultant Pune")
+st.caption("Built by Darshan Mahale | B.Pharm + AI Consultant Pune")
 
 uploaded = st.file_uploader("Upload your Care/Marg Excel", type=["xlsx","csv"])
 
-if uploaded:
-    df = pd.read_csv(uploaded) if uploaded.name.endswith('csv') else pd.read_excel(uploaded)
-    
-    # DAX logic in Python
-    df['Expiry_Days'] = (pd.to_datetime(df['Expiry_Date']) - datetime.now()).dt.days
-    df['Sales_Velocity'] = df['Quantity_Sold'] / 180 # 6 months
-    
-    def get_status(row):
-        if row['Expiry_Days'] < 30 and row['Sales_Velocity'] < row['Stock_Left']/30:
-            return "🔴 RED - Confirm Loss - Return Now"
-        elif row['Expiry_Days'] < 60 and row['Sales_Velocity'] < 2:
-            return "🟡 YELLOW - Push via Doctor"
-        else:
-            return "🟢 GREEN - Will Sell"
+if uploaded is None:
+    st.info("Upload your file to see AI Report. Sample columns needed: Product, Expiry_Date, Stock_Left, Quantity_Sold, Sales_Amount")
+    st.stop()
 
-    df['AI_Action'] = df.apply(get_status, axis=1)
-    
-    # KPIs
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Confirm Loss Value", f"₹ {df[df['AI_Action'].str.contains('RED')]['Sales_Amount'].sum():,}")
-    col2.metric("Push Urgently", len(df[df['AI_Action'].str.contains('YELLOW')]))
-    col3.metric("Safe Stock", len(df[df['AI_Action'].str.contains('GREEN')]))
+# Load file
+if uploaded.name.endswith('csv'):
+    df = pd.read_csv(uploaded)
+else:
+    df = pd.read_excel(uploaded)
 
-    st.dataframe(df[df['AI_Action'].str.contains('RED')])
-    
-    st.download_button("Download Action Report for Distributor", df.to_csv(), "expiry_action_rep
-    
-ort.csv")
+# Convert dates safely
+df['Expiry_Date'] = pd.to_datetime(df['Expiry_Date'], errors='coerce')
+df['Expiry_Days'] = (df['Expiry_Date'] - datetime.now()).dt.days
+df['Sales_Velocity'] = df['Quantity_Sold'] / 180
+
+def get_status(row):
+    if row['Expiry_Days'] < 30 and row['Stock_Left'] > row['Sales_Velocity'] * 30:
+        return "RED - Confirm Loss"
+    elif row['Expiry_Days'] < 60:
+        return "YELLOW - Push Urgently"
+    else:
+        return "GREEN - Will Sell"
+
+df['AI_Action'] = df.apply(get_status, axis=1)
+
+# KPIs
+col1, col2, col3 = st.columns(3)
+red_df = df[df['AI_Action'].str.contains('RED')]
+yellow_df = df[df['AI_Action'].str.contains('YELLOW')]
+
+col1.metric("Confirm Loss Value", f"Rs {red_df['Sales_Amount'].sum():,.0f}")
+col2.metric("Push Urgently", len(yellow_df))
+col3.metric("Safe Stock", len(df) - len(red_df) - len(yellow_df))
+
+st.subheader("🔴 RED - Return to Distributor NOW")
+st.dataframe(red_df)
+
+st.subheader("🟡 YELLOW - Push via Doctor/MR")
+st.dataframe(yellow_df)
+
+# FIXED DOWNLOAD BUTTON
+csv_data = df.to_csv(index=False).encode('utf-8')
+st.download_button(
+    label="Download Action Report",
+    data=csv_data,
+    file_name="expiry_action_report.csv",
+    mime="text/csv"
+)
